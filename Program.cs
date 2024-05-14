@@ -5,6 +5,7 @@ using Google.Apis.Services;
 using Google.Apis.Util.Store;
 using System;
 using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -13,8 +14,8 @@ namespace GmailAPIExample
 {
     class Program
     {
-        static string[] Scopes = { GmailService.Scope.GmailReadonly, GmailService.Scope.GmailSend };
-        static string ApplicationName = "Gmail API .NET Core Example";
+        static string[] Scopes = { GmailService.Scope.MailGoogleCom };
+        static string ApplicationName = "UnsubscribeMe";
 
         static void Main(string[] args)
         {
@@ -70,12 +71,33 @@ namespace GmailAPIExample
 
                     if (unsubscribeHeader != null)
                     {
-                        string unsubscribeUrl = ExtractUnsubscribeUrl(unsubscribeHeader.Value);
-
-                        if (!string.IsNullOrEmpty(unsubscribeUrl))
+                        var values = unsubscribeHeader.Value.Split(",").Select(x => ExtractUnsubscribeUrl(x));
+                        foreach (var unsubscribeUrl in values)
                         {
-                            SendUnsubscribeEmail(service, unsubscribeUrl);
-                            Console.WriteLine($"Unsubscribe email sent for message with ID: {msg.Id}");
+                            if (!string.IsNullOrEmpty(unsubscribeUrl))
+                            {
+                                if (unsubscribeUrl.StartsWith("mailto"))
+                                {
+                                    SendUnsubscribeEmail(service, unsubscribeUrl);
+                                    Console.WriteLine($"Unsubscribe email sent for message with ID: {msg.Id}");
+                                }
+                                else
+                                {
+                                    HttpClient client = new HttpClient();
+                                    client.GetAsync(unsubscribeUrl).Wait();
+                                    Console.WriteLine($"Unsubscribe URL visited {unsubscribeUrl}");
+                                }
+
+                                try
+                                {
+                                    var deleteRequest = service.Users.Messages.Delete("me", msg.Id);
+                                    deleteRequest.Execute();
+                                }
+                                catch(Google.GoogleApiException e)
+                                {
+                                    Console.WriteLine($"Could not delete {msg.Id}: {e}");
+                                }
+                            }
                         }
                     }
                 }
@@ -115,10 +137,22 @@ namespace GmailAPIExample
 
         static void SendUnsubscribeEmail(GmailService service, string unsubscribeUrl)
         {
+            var withoutMailto = unsubscribeUrl.Substring(unsubscribeUrl.IndexOf(":") + 1);
+            var toAddress = withoutMailto;
+            var subject = String.Empty;
+
+            if (withoutMailto.Contains('?'))
+            {
+                toAddress = withoutMailto.Split("?")[0];
+                var query = withoutMailto.Split("?")[1];
+                subject = query.Substring(query.IndexOf("subject=") + ("subject=".Count()));
+            }
+
             // Create the unsubscribe email message.
             var message = new Message
             {
-                Raw = CreateUnsubscribeEmailBody(unsubscribeUrl)
+                // Raw = CreateUnsubscribeEmailBody(unsubscribeUrl)
+                Raw = CreateMessageBody("jfwallac@gmail.com", toAddress, subject, "")
             };
 
             // Send the unsubscribe email.
@@ -132,6 +166,13 @@ namespace GmailAPIExample
             var body = $"To: {unsubscribeUrl}\r\nSubject: Unsubscribe\r\n\r\nPlease unsubscribe me from this mailing list.";
 
             return Base64UrlEncode(body);
+        }
+
+        static string CreateMessageBody(string from, string to, string subject, string body)
+        {
+            var msgBody = $"From: {from}\r\nTo: {to}\r\nSubject: {subject}\r\n\r\n{body}";
+            Console.WriteLine(msgBody);
+            return Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(msgBody));
         }
 
         static string Base64UrlEncode(string input)
