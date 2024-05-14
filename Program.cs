@@ -54,7 +54,8 @@ namespace GmailAPIExample
             }
 
             // List all messages in the specified folder.
-            ListMessagesResponse response = service.Users.Messages.List("me").Q($"in:{folderId}").Execute();
+            // ListMessagesResponse response = service.Users.Messages.List("me").Q($"in:{folderId}").Execute();
+            var response = service.Users.Messages.List("me").Execute();
             IList<Message> messages = response.Messages;
 
             if (messages != null && messages.Count > 0)
