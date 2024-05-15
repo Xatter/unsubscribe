@@ -1,3 +1,5 @@
+# About
+
 This project uses the Gmail API to automatically unsubscribe from any emails that have the `List-Unsusbscribe` header.
 
 This is the same thing Gmail uses when they prompt you if you'd like to unsubscribe to a single email, or use the unsubscribe button. Why they don't offer to automatically unsubscribe if they can detect this is probably because they dropped the motto "Don't be evil".
