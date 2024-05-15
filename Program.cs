@@ -6,6 +6,7 @@ using Google.Apis.Util.Store;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -221,10 +222,16 @@ namespace GmailAPIExample
                 {
                     // Extract the retry time from the exception message
                     string retryAfter = ex.Message.Split('(')[0].Trim().Split(' ').Last();
-                    DateTime retryTime = DateTime.Parse(retryAfter);
+                         // Create a CultureInfo object with the "en-US" culture
+                    CultureInfo culture = new CultureInfo("en-US");
+
+                    // Define the custom date and time format
+                    string format = "yyyy-MM-ddTHH:mm:ss.fffZ";
+
+                    DateTime retryTime = DateTime.ParseExact(retryAfter, format, culture);
 
                     // Calculate the delay until the retry time
-                    TimeSpan delay = retryTime - DateTime.UtcNow;
+                    TimeSpan delay = retryTime - DateTime.Now;
 
                     if (delay.TotalSeconds > 0)
                     {
