@@ -8,8 +8,8 @@ Gmail's API REQUIRES OAUTH, which means you need to run this from your laptop so
 
 # Requirements
 
-[dotnet core 8.0+](https://dotnet.microsoft.com/en-us/download)
-[Gmail Oauth](https://developers.google.com/gmail/api/auth/web-server) API setup on gCloud
+* [dotnet core 8.0+](https://dotnet.microsoft.com/en-us/download)
+* [Gmail Oauth](https://developers.google.com/gmail/api/auth/web-server) API setup on gCloud
 
 # How do I run this?
 
