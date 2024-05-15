@@ -17,6 +17,16 @@ namespace GmailAPIExample
         static string[] Scopes = { GmailService.Scope.MailGoogleCom };
         static string ApplicationName = "UnsubscribeMe";
 
+        static T Safe<T>(Func<T> func) {
+            try {
+                return func();
+            } catch(System.Exception e) {
+                System.Console.WriteLine(e);
+            }
+
+            return default(T);
+        }
+
         static void Main(string[] args)
         {
             UserCredential credential;
@@ -27,7 +37,7 @@ namespace GmailAPIExample
                 // automatically when the authorization flow completes for the first time.
                 string credPath = "token.json";
                 credential = GoogleWebAuthorizationBroker.AuthorizeAsync(
-                    GoogleClientSecrets.Load(stream).Secrets,
+                    GoogleClientSecrets.FromStream(stream).Secrets,
                     Scopes,
                     "user",
                     CancellationToken.None,
@@ -59,15 +69,17 @@ namespace GmailAPIExample
             // request.Q = $"in:{folderId}";
             // var response = request.Execute();
 
-            string nextPageToken = String.Empty;
+            string? nextPageToken = String.Empty;
 
             do
             {
                 var request = service.Users.Messages.List("me");
                 request.LabelIds = new List<string>() { folderId };
                 request.PageToken = nextPageToken;
-                var response = request.Execute();
-                IList<Message> messages = response.Messages;
+
+                var response = Safe(request.Execute);
+
+                IList<Message>? messages = response?.Messages;
 
                 if (messages != null && messages.Count > 0)
                 {
@@ -75,7 +87,7 @@ namespace GmailAPIExample
                     foreach (var message in messages)
                     {
                         // Get the message details.
-                        Message msg = service.Users.Messages.Get("me", message.Id).Execute();
+                        Message msg = Safe(service.Users.Messages.Get("me", message.Id).Execute);
 
                         // Check if the "List-Unsubscribe" header exists.
                         var unsubscribeHeader = msg.Payload.Headers.FirstOrDefault(header => header.Name.Equals("List-Unsubscribe", StringComparison.OrdinalIgnoreCase));
@@ -94,11 +106,14 @@ namespace GmailAPIExample
                                     }
                                     else
                                     {
-                                        try{
+                                        try
+                                        {
                                             HttpClient client = new HttpClient();
                                             client.GetAsync(unsubscribeUrl).Wait();
                                             Console.WriteLine($"Unsubscribe URL visited {unsubscribeUrl}");
-                                        } catch (Exception e) {
+                                        }
+                                        catch (Exception e)
+                                        {
                                             Console.WriteLine($"Error while visiting URL: {unsubscribeUrl}: {e}");
                                         }
                                     }
@@ -109,7 +124,7 @@ namespace GmailAPIExample
                         {
                             Console.WriteLine($"Deleting Message {message.Id}");
                             var deleteRequest = service.Users.Messages.Delete("me", message.Id);
-                            deleteRequest.Execute();
+                            Safe(deleteRequest.Execute);
                         }
                         catch (Google.GoogleApiException e)
                         {
@@ -122,17 +137,17 @@ namespace GmailAPIExample
                     Console.WriteLine("No messages found in the specified folder.");
                 }
 
-                nextPageToken = response.NextPageToken;
+                nextPageToken = response?.NextPageToken;
             } while (!String.IsNullOrEmpty(nextPageToken));
         }
 
         static string GetFolderId(GmailService service, string folderName)
         {
             // List all labels in the user's mailbox.
-            var labels = service.Users.Labels.List("me").Execute().Labels;
+            var labels = Safe(service.Users.Labels.List("me").Execute)?.Labels;
 
             // Find the label with the specified folder name.
-            var folder = labels.FirstOrDefault(label => label.Name.Equals(folderName, StringComparison.OrdinalIgnoreCase));
+            var folder = labels?.FirstOrDefault(label => label.Name.Equals(folderName, StringComparison.OrdinalIgnoreCase));
 
             return folder?.Id;
         }
@@ -177,26 +192,11 @@ namespace GmailAPIExample
             service.Users.Messages.Send(message, "me").Execute();
         }
 
-        static string CreateUnsubscribeEmailBody(string unsubscribeUrl)
-        {
-            // Create the email body for the unsubscribe request.
-            // This is a simple example, and you may need to adjust it based on the specific requirements of the unsubscribe process.
-            var body = $"To: {unsubscribeUrl}\r\nSubject: Unsubscribe\r\n\r\nPlease unsubscribe me from this mailing list.";
-
-            return Base64UrlEncode(body);
-        }
-
         static string CreateMessageBody(string from, string to, string subject, string body)
         {
             var msgBody = $"From: {from}\r\nTo: {to}\r\nSubject: {subject}\r\n\r\n{body}";
             Console.WriteLine(msgBody);
             return Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(msgBody));
-        }
-
-        static string Base64UrlEncode(string input)
-        {
-            var inputBytes = System.Text.Encoding.UTF8.GetBytes(input);
-            return Convert.ToBase64String(inputBytes).Replace("+", "-").Replace("/", "_").Replace("=", "");
         }
     }
 }
