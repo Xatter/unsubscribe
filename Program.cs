@@ -17,10 +17,14 @@ namespace GmailAPIExample
         static string[] Scopes = { GmailService.Scope.MailGoogleCom };
         static string ApplicationName = "UnsubscribeMe";
 
-        static T Safe<T>(Func<T> func) {
-            try {
+        static T Safe<T>(Func<T> func)
+        {
+            try
+            {
                 return func();
-            } catch(System.Exception e) {
+            }
+            catch (System.Exception e)
+            {
                 System.Console.WriteLine(e);
             }
 
@@ -29,6 +33,7 @@ namespace GmailAPIExample
 
         static void Main(string[] args)
         {
+            var cache = new HashSet<string>();
             UserCredential credential;
 
             using (var stream = new FileStream("credentials.json", FileMode.Open, FileAccess.Read))
@@ -94,6 +99,17 @@ namespace GmailAPIExample
 
                         if (unsubscribeHeader != null)
                         {
+                            // Don't send over and over to the same recipient
+                            if (cache.Contains(unsubscribeHeader.Value))
+                            {
+                                DeleteMail(service, message);
+                                continue;
+                            }
+                            else
+                            {
+                                cache.Add(unsubscribeHeader.Value);
+                            }
+
                             var values = unsubscribeHeader.Value.Split(",").Select(x => ExtractUnsubscribeUrl(x));
                             foreach (var unsubscribeUrl in values)
                             {
@@ -120,16 +136,8 @@ namespace GmailAPIExample
                                 }
                             }
                         }
-                        try
-                        {
-                            Console.WriteLine($"Deleting Message {message.Id}");
-                            var deleteRequest = service.Users.Messages.Delete("me", message.Id);
-                            Safe(deleteRequest.Execute);
-                        }
-                        catch (Google.GoogleApiException e)
-                        {
-                            Console.WriteLine($"Could not delete {message.Id}: {e}");
-                        }
+
+                        DeleteMail(service, message);
                     }
                 }
                 else
@@ -139,6 +147,20 @@ namespace GmailAPIExample
 
                 nextPageToken = response?.NextPageToken;
             } while (!String.IsNullOrEmpty(nextPageToken));
+        }
+
+        private static void DeleteMail(GmailService service, Message message)
+        {
+            try
+            {
+                Console.WriteLine($"Deleting Message {message.Id}");
+                var deleteRequest = service.Users.Messages.Delete("me", message.Id);
+                Safe(deleteRequest.Execute);
+            }
+            catch (Google.GoogleApiException e)
+            {
+                Console.WriteLine($"Could not delete {message.Id}: {e}");
+            }
         }
 
         static string GetFolderId(GmailService service, string folderName)
@@ -189,7 +211,42 @@ namespace GmailAPIExample
             };
 
             // Send the unsubscribe email.
-            service.Users.Messages.Send(message, "me").Execute();
+            try
+            {
+                service.Users.Messages.Send(message, "me").Execute();
+            }
+            catch (Google.GoogleApiException ex)
+            {
+                if (ex.HttpStatusCode == System.Net.HttpStatusCode.TooManyRequests)
+                {
+                    // Extract the retry time from the exception message
+                    string retryAfter = ex.Message.Split('(')[0].Trim().Split(' ').Last();
+                    DateTime retryTime = DateTime.Parse(retryAfter);
+
+                    // Calculate the delay until the retry time
+                    TimeSpan delay = retryTime - DateTime.UtcNow;
+
+                    if (delay.TotalSeconds > 0)
+                    {
+                        Console.WriteLine($"User-rate limit exceeded. Retrying after {delay.TotalSeconds} seconds...");
+
+                        // Wait for the specified delay before retrying
+                        System.Threading.Thread.Sleep(delay);
+
+                        // Retry the operation
+                        service.Users.Messages.Send(message, "me").Execute();
+                    }
+                    else
+                    {
+                        Console.WriteLine("User-rate limit exceeded, but the retry time has already passed.");
+                    }
+                }
+                else
+                {
+                    // Handle other types of GoogleApiException
+                    Console.WriteLine($"GoogleApiException occurred: {ex.Message}");
+                }
+            }
         }
 
         static string CreateMessageBody(string from, string to, string subject, string body)
