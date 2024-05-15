@@ -55,57 +55,75 @@ namespace GmailAPIExample
             }
 
             // List all messages in the specified folder.
-            // ListMessagesResponse response = service.Users.Messages.List("me").Q($"in:{folderId}").Execute();
-            var response = service.Users.Messages.List("me").Execute();
-            IList<Message> messages = response.Messages;
+            // var request = service.Users.Messages.List("me");
+            // request.Q = $"in:{folderId}";
+            // var response = request.Execute();
 
-            if (messages != null && messages.Count > 0)
+            string nextPageToken = String.Empty;
+
+            do
             {
-                foreach (var message in messages)
+                var request = service.Users.Messages.List("me");
+                request.LabelIds = new List<string>() { folderId };
+                request.PageToken = nextPageToken;
+                var response = request.Execute();
+                IList<Message> messages = response.Messages;
+
+                if (messages != null && messages.Count > 0)
                 {
-                    // Get the message details.
-                    Message msg = service.Users.Messages.Get("me", message.Id).Execute();
-
-                    // Check if the "List-Unsubscribe" header exists.
-                    var unsubscribeHeader = msg.Payload.Headers.FirstOrDefault(header => header.Name.Equals("List-Unsubscribe", StringComparison.OrdinalIgnoreCase));
-
-                    if (unsubscribeHeader != null)
+                    Console.WriteLine($"Found {messages.Count()} messages in folder: {folderId}");
+                    foreach (var message in messages)
                     {
-                        var values = unsubscribeHeader.Value.Split(",").Select(x => ExtractUnsubscribeUrl(x));
-                        foreach (var unsubscribeUrl in values)
-                        {
-                            if (!string.IsNullOrEmpty(unsubscribeUrl))
-                            {
-                                if (unsubscribeUrl.StartsWith("mailto"))
-                                {
-                                    SendUnsubscribeEmail(service, unsubscribeUrl);
-                                    Console.WriteLine($"Unsubscribe email sent for message with ID: {msg.Id}");
-                                }
-                                else
-                                {
-                                    HttpClient client = new HttpClient();
-                                    client.GetAsync(unsubscribeUrl).Wait();
-                                    Console.WriteLine($"Unsubscribe URL visited {unsubscribeUrl}");
-                                }
+                        // Get the message details.
+                        Message msg = service.Users.Messages.Get("me", message.Id).Execute();
 
-                                try
+                        // Check if the "List-Unsubscribe" header exists.
+                        var unsubscribeHeader = msg.Payload.Headers.FirstOrDefault(header => header.Name.Equals("List-Unsubscribe", StringComparison.OrdinalIgnoreCase));
+
+                        if (unsubscribeHeader != null)
+                        {
+                            var values = unsubscribeHeader.Value.Split(",").Select(x => ExtractUnsubscribeUrl(x));
+                            foreach (var unsubscribeUrl in values)
+                            {
+                                if (!string.IsNullOrEmpty(unsubscribeUrl))
                                 {
-                                    var deleteRequest = service.Users.Messages.Delete("me", msg.Id);
-                                    deleteRequest.Execute();
-                                }
-                                catch(Google.GoogleApiException e)
-                                {
-                                    Console.WriteLine($"Could not delete {msg.Id}: {e}");
+                                    if (unsubscribeUrl.StartsWith("mailto"))
+                                    {
+                                        SendUnsubscribeEmail(service, unsubscribeUrl);
+                                        Console.WriteLine($"Unsubscribe email sent for message with ID: {msg.Id}");
+                                    }
+                                    else
+                                    {
+                                        try{
+                                            HttpClient client = new HttpClient();
+                                            client.GetAsync(unsubscribeUrl).Wait();
+                                            Console.WriteLine($"Unsubscribe URL visited {unsubscribeUrl}");
+                                        } catch (Exception e) {
+                                            Console.WriteLine($"Error while visiting URL: {unsubscribeUrl}: {e}");
+                                        }
+                                    }
                                 }
                             }
                         }
+                        try
+                        {
+                            Console.WriteLine($"Deleting Message {message.Id}");
+                            var deleteRequest = service.Users.Messages.Delete("me", message.Id);
+                            deleteRequest.Execute();
+                        }
+                        catch (Google.GoogleApiException e)
+                        {
+                            Console.WriteLine($"Could not delete {message.Id}: {e}");
+                        }
                     }
                 }
-            }
-            else
-            {
-                Console.WriteLine("No messages found in the specified folder.");
-            }
+                else
+                {
+                    Console.WriteLine("No messages found in the specified folder.");
+                }
+
+                nextPageToken = response.NextPageToken;
+            } while (!String.IsNullOrEmpty(nextPageToken));
         }
 
         static string GetFolderId(GmailService service, string folderName)
