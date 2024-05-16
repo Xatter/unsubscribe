@@ -15,6 +15,7 @@ namespace GmailAPIExample
 {
     class Program
     {
+        private const string EMAIL_ADDRESS = "jfwallac@gmail.com";
         static string[] Scopes = { GmailService.Scope.MailGoogleCom };
         static string ApplicationName = "UnsubscribeMe";
 
@@ -254,8 +255,7 @@ namespace GmailAPIExample
             // Create the unsubscribe email message.
             var message = new Message
             {
-                // Raw = CreateUnsubscribeEmailBody(unsubscribeUrl)
-                Raw = CreateMessageBody("jfwallac@gmail.com", toAddress, subject, "")
+                Raw = CreateMessageBody(EMAIL_ADDRESS, toAddress, subject, "")
             };
 
             // Send the unsubscribe email.
