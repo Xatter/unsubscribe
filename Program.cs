@@ -35,16 +35,13 @@ namespace GmailAPIExample
             return default(T);
         }
 
-        static void Retry<T>(Func<T> f)
+        static T Retry<T>(Func<T> f)
         {
-            var success = false;
-            while (!success)
+            while (true)
             {
-
                 try
                 {
-                    f();
-                    success = true;
+                    return f();
                 }
                 catch (Google.GoogleApiException ex)
                 {
@@ -83,6 +80,8 @@ namespace GmailAPIExample
                         // Handle other types of GoogleApiException
                         Console.WriteLine($"GoogleApiException occurred: {ex.Message}");
                     }
+                } catch (TaskCanceledException) {
+                    Console.WriteLine($"Got TaskCanceledException: Retrying ...");
                 }
             }
         }
@@ -97,15 +96,18 @@ namespace GmailAPIExample
                 var request = service.Users.Messages.List("me");
                 request.LabelIds = new List<string>() { folderId };
                 request.PageToken = nextPageToken;
+                request.MaxResults = 500;
 
                 var response = Safe(request.Execute);
 
                 IList<Message>? messages = response?.Messages;
                 if (messages != null && messages.Count > 0)
                 {
+                    Console.WriteLine($"Got {messages.Count} messages");
+                    Console.WriteLine($"Total so far: {result.Count}");
                     foreach (var message in messages)
                     {
-                        var msg = service.Users.Messages.Get("me", message.Id).Execute();
+                        var msg = Retry(() => service.Users.Messages.Get("me", message.Id).Execute());
                         if (msg != null)
                         {
                             result.Add(msg);
