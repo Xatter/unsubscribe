@@ -9,15 +9,16 @@ using System.ComponentModel.DataAnnotations;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Reflection.Metadata;
 using System.Threading;
 
 namespace GmailAPIExample
 {
     class Program
     {
-        private const string EMAIL_ADDRESS = "jfwallac@gmail.com";
-        static string[] Scopes = { GmailService.Scope.MailGoogleCom };
-        static string ApplicationName = "UnsubscribeMe";
+        const string EMAIL_ADDRESS = "jfwallac@gmail.com";
+        static readonly string[] Scopes = { GmailService.Scope.MailGoogleCom };
+        const string ApplicationName = "UnsubscribeMe";
 
         static T Safe<T>(Func<T> func)
         {
