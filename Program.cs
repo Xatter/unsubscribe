@@ -3,6 +3,7 @@ using Google.Apis.Gmail.v1;
 using Google.Apis.Gmail.v1.Data;
 using Google.Apis.Services;
 using Google.Apis.Util.Store;
+using Microsoft.VisualBasic;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
@@ -34,16 +35,13 @@ namespace GmailAPIExample
             return default(T);
         }
 
-        static void Retry<T>(Func<T> f)
+        static T Retry<T>(Func<T> f)
         {
-            var success = false;
-            while (!success)
+            while (true)
             {
-
                 try
                 {
-                    f();
-                    success = true;
+                    return f();
                 }
                 catch (Google.GoogleApiException ex)
                 {
@@ -82,8 +80,45 @@ namespace GmailAPIExample
                         // Handle other types of GoogleApiException
                         Console.WriteLine($"GoogleApiException occurred: {ex.Message}");
                     }
+                } catch (TaskCanceledException) {
+                    Console.WriteLine($"Got TaskCanceledException: Retrying ...");
                 }
             }
+        }
+
+        static IList<Message> FetchAllMessages(GmailService service, string folderId)
+        {
+            var result = new List<Message>();
+            string? nextPageToken = String.Empty;
+
+            do
+            {
+                var request = service.Users.Messages.List("me");
+                request.LabelIds = new List<string>() { folderId };
+                request.PageToken = nextPageToken;
+                request.MaxResults = 500;
+
+                var response = Safe(request.Execute);
+
+                IList<Message>? messages = response?.Messages;
+                if (messages != null && messages.Count > 0)
+                {
+                    Console.WriteLine($"Got {messages.Count} messages");
+                    Console.WriteLine($"Total so far: {result.Count}");
+                    foreach (var message in messages)
+                    {
+                        var msg = Retry(() => service.Users.Messages.Get("me", message.Id).Execute());
+                        if (msg != null)
+                        {
+                            result.Add(msg);
+                        }
+                    }
+                }
+
+                nextPageToken = response?.NextPageToken;
+            } while (!String.IsNullOrEmpty(nextPageToken));
+
+            return result;
         }
 
         static void Main(string[] args)
@@ -124,79 +159,54 @@ namespace GmailAPIExample
                 return;
             }
 
-            string? nextPageToken = String.Empty;
+            var allMessages = FetchAllMessages(service, folderId);
+            var toUnsubscribe = allMessages.Where(msg => msg.Payload.Headers.FirstOrDefault(header => header.Name.Equals("List-Unsubscribe", StringComparison.OrdinalIgnoreCase)) != null);
+            var toDelete = allMessages.Where(msg => msg.Payload.Headers.FirstOrDefault(header => header.Name.Equals("List-Unsubscribe", StringComparison.OrdinalIgnoreCase)) == null);
 
-            do
+            var batchDeleteRequest = new BatchDeleteMessagesRequest
             {
-                var request = service.Users.Messages.List("me");
-                request.LabelIds = new List<string>() { folderId };
-                request.PageToken = nextPageToken;
+                Ids = toDelete.Select(m => m.Id).ToList()
+            };
+            service.Users.Messages.BatchDelete(batchDeleteRequest, "me");
 
-                var response = Safe(request.Execute);
+            Console.WriteLine($"Found {allMessages.Count()} messages in folder: {folderId}");
+            Console.WriteLine($"Found {toDelete.Count()} messages that do not have List-Unsubscribe header... deleting");
 
-                IList<Message>? messages = response?.Messages;
+            var groupedByHeader = toUnsubscribe.GroupBy(msg =>
+                msg.Payload.Headers.FirstOrDefault(header => header.Name.Equals("List-Unsubscribe", StringComparison.OrdinalIgnoreCase))?.Value
+            );
 
-                if (messages != null && messages.Count > 0)
+            foreach (var group in groupedByHeader)
+            {
+                var values = group.Key.Split(",").Select(x => ExtractUnsubscribeUrl(x));
+                foreach (var unsubscribeUrl in values)
                 {
-                    Console.WriteLine($"Found {messages.Count()} messages in folder: {folderId}");
-                    foreach (var message in messages)
+                    if (unsubscribeUrl.StartsWith("mailto"))
                     {
-                        // Get the message details.
-                        Message msg = Safe(service.Users.Messages.Get("me", message.Id).Execute);
-
-                        // Check if the "List-Unsubscribe" header exists.
-                        var unsubscribeHeader = msg.Payload.Headers.FirstOrDefault(header => header.Name.Equals("List-Unsubscribe", StringComparison.OrdinalIgnoreCase));
-
-                        if (unsubscribeHeader != null)
+                        SendUnsubscribeEmail(service, unsubscribeUrl);
+                        Console.WriteLine($"Unsubscribe email sent for message with List-Unsubscribe: {group.Key}");
+                    }
+                    else
+                    {
+                        try
                         {
-                            // Don't send over and over to the same recipient
-                            if (cache.Contains(unsubscribeHeader.Value))
-                            {
-                                DeleteMail(service, message);
-                                continue;
-                            }
-                            else
-                            {
-                                cache.Add(unsubscribeHeader.Value);
-                            }
-
-                            var values = unsubscribeHeader.Value.Split(",").Select(x => ExtractUnsubscribeUrl(x));
-                            foreach (var unsubscribeUrl in values)
-                            {
-                                if (!string.IsNullOrEmpty(unsubscribeUrl))
-                                {
-                                    if (unsubscribeUrl.StartsWith("mailto"))
-                                    {
-                                        SendUnsubscribeEmail(service, unsubscribeUrl);
-                                        Console.WriteLine($"Unsubscribe email sent for message with ID: {msg.Id}");
-                                    }
-                                    else
-                                    {
-                                        try
-                                        {
-                                            HttpClient client = new HttpClient();
-                                            client.GetAsync(unsubscribeUrl).Wait();
-                                            Console.WriteLine($"Unsubscribe URL visited {unsubscribeUrl}");
-                                        }
-                                        catch (Exception e)
-                                        {
-                                            Console.WriteLine($"Error while visiting URL: {unsubscribeUrl}: {e}");
-                                        }
-                                    }
-                                }
-                            }
+                            HttpClient client = new HttpClient();
+                            client.GetAsync(unsubscribeUrl).Wait();
+                            Console.WriteLine($"Unsubscribe URL visited {unsubscribeUrl}");
                         }
-
-                        DeleteMail(service, message);
+                        catch (Exception e)
+                        {
+                            Console.WriteLine($"Error while visiting URL: {unsubscribeUrl}: {e}");
+                        }
                     }
                 }
-                else
-                {
-                    Console.WriteLine("No messages found in the specified folder.");
-                }
 
-                nextPageToken = response?.NextPageToken;
-            } while (!String.IsNullOrEmpty(nextPageToken));
+                var deleteRequest = new BatchDeleteMessagesRequest
+                {
+                    Ids = group.Select(m => m.Id).ToList()
+                };
+                service.Users.Messages.BatchDelete(batchDeleteRequest, "me");
+            }
         }
 
         static void DeleteMail(GmailService service, Message message)
