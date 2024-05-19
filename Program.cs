@@ -160,6 +160,11 @@ namespace GmailAPIExample
             }
 
             var allMessages = FetchAllMessages(service, folderId);
+
+            // Save them for later, because it takes a long time to load them all
+            var json = System.Text.Json.JsonSerializer.Serialize(allMessages);
+            File.WriteAllText("allMessages.json", json);
+            
             var toUnsubscribe = allMessages.Where(msg => msg.Payload.Headers.FirstOrDefault(header => header.Name.Equals("List-Unsubscribe", StringComparison.OrdinalIgnoreCase)) != null);
             var toDelete = allMessages.Where(msg => msg.Payload.Headers.FirstOrDefault(header => header.Name.Equals("List-Unsubscribe", StringComparison.OrdinalIgnoreCase)) == null);
 
