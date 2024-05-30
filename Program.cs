@@ -13,9 +13,43 @@ using System.IO;
 using System.Linq;
 using System.Reflection.Metadata;
 using System.Threading;
+using System.Collections.Concurrent;
+using System.Net.Sockets;
+using System.Text.Json;
 
 namespace GmailAPIExample
 {
+    public class Header
+    {
+        public string Name { get; set; }
+        public string Value { get; set; }
+        public string? ETag { get; set; }
+    }
+
+    public class Payload
+    {
+        public string? Body { get; set; }
+        public string? Filename { get; set; }
+        public List<Header> Headers { get; set; }
+        public string MimeType { get; set; }
+        public string? PartId { get; set; }
+        public string? Parts { get; set; }
+        public string? ETag { get; set; }
+    }
+
+    public class MessageInfo
+    {
+        public int HistoryId { get; set; }
+        public string Id { get; set; }
+        public long InternalDate { get; set; }
+        public List<string> LabelIds { get; set; }
+        public Payload Payload { get; set; }
+        public string? Raw { get; set; }
+        public int SizeEstimate { get; set; }
+        public string Snippet { get; set; }
+        public string ThreadId { get; set; }
+        public string? ETag { get; set; }
+    }
     class Program
     {
         const string EMAIL_ADDRESS = "jfwallac@gmail.com";
@@ -89,9 +123,12 @@ namespace GmailAPIExample
             }
         }
 
-        static IList<(string, IList<MessagePartHeader>)> FetchAllMessages(GmailService service, string folderId)
+
+        static IList<Message> FetchAllMessages(GmailService service, string folderId)
         {
-            var result = new List<(string, IList<MessagePartHeader>)>();
+            var result = new List<Message>();
+
+
             string? nextPageToken = String.Empty;
 
             BatchRequest batch = new BatchRequest(service);
@@ -115,19 +152,34 @@ namespace GmailAPIExample
                         var getRequest = service.Users.Messages.Get("me", message.Id);
                         getRequest.Format = UsersResource.MessagesResource.GetRequest.FormatEnum.Metadata;
 
-                        batch.Queue<Message>(getRequest, (content, error, i, httpresponse) =>
+                        var msg = Retry(getRequest.Execute);
+
+                        if (msg != null)
                         {
-                            if (error != null)
-                            {
-                                Console.WriteLine($"Error retrieving message {content.Id}: {error.Message}");
-                            }
-                            else
-                            {
-                                result.Add((content.Id, content.Payload.Headers));
-                            }
-                        });
+                            File.AppendAllLines("allMessages.json", new List<string> { JsonSerializer.Serialize(msg) });
+                            result.Add(msg);
+                        }
+
+
+                        // batch.Queue<Message>(getRequest, (content, error, i, httpresponse) =>
+                        // {
+                        //     if (error != null)
+                        //     {
+                        //         Console.WriteLine($"Error retrieving message {message.Id}: {error.Message}");
+                        //     }
+                        //     else
+                        //     {
+                        //         fileQueue.Enqueue(new MessageInfo{
+                        //             Id = content.Id,
+                        //             Headers = content.Payload.Headers
+                        //         });
+
+                        //         result.Add((content.Id, content.Payload.Headers));
+                        //     }
+                        // });
                     }
-                    batch.ExecuteAsync().Wait();
+
+                    // batch.ExecuteAsync().Wait();
                 }
 
                 nextPageToken = response?.NextPageToken;
@@ -139,7 +191,6 @@ namespace GmailAPIExample
 
         static void Main(string[] args)
         {
-            var cache = new HashSet<string>();
             UserCredential credential;
 
             using (var stream = new FileStream("credentials.json", FileMode.Open, FileAccess.Read))
@@ -175,31 +226,49 @@ namespace GmailAPIExample
                 return;
             }
 
-            var allMessages = FetchAllMessages(service, folderId);
+            var allMessages = new List<MessageInfo>();
 
-            // Save them for later, because it takes a long time to load them all
-            var json = System.Text.Json.JsonSerializer.Serialize(allMessages);
-            File.WriteAllText("allMessages.json", json);
-
-            var toUnsubscribe = allMessages.Where(msg => msg.Item2.FirstOrDefault(header => header.Name.Equals("List-Unsubscribe", StringComparison.OrdinalIgnoreCase)) != null);
-            var toDelete = allMessages.Where(msg => msg.Item2.FirstOrDefault(header => header.Name.Equals("List-Unsubscribe", StringComparison.OrdinalIgnoreCase)) == null);
-
-            var batchDeleteRequest = new BatchDeleteMessagesRequest
+            if (File.Exists("allMessages.json"))
             {
-                Ids = toDelete.Select(m => m.Item1).ToList()
-            };
+                foreach (var line in File.ReadAllLines("allMessages.json"))
+                {
+                    var record = JsonSerializer.Deserialize<MessageInfo>(line);
+                    allMessages.Add(record);
+                }
+            }
+
+            // var allMessages = FetchAllMessages(service, folderId);
+            // // Save them for later, because it takes a long time to load them all
+            // var json = System.Text.Json.JsonSerializer.Serialize(allMessages);
+            // File.WriteAllText("allMessages.json", json);
+
+            var toUnsubscribe = allMessages.Where(msg => msg.Payload.Headers.FirstOrDefault(header => header.Name.Equals("List-Unsubscribe", StringComparison.OrdinalIgnoreCase)) != null);
+            var toDelete = allMessages.Where(msg => msg.Payload.Headers.FirstOrDefault(header => header.Name.Equals("List-Unsubscribe", StringComparison.OrdinalIgnoreCase)) == null);
+
+	    var batchDeleteRequest = new BatchDeleteMessagesRequest
+            {
+                Ids = toDelete.Select(m => m.Id).ToList()
+		};
             service.Users.Messages.BatchDelete(batchDeleteRequest, "me");
 
             Console.WriteLine($"Found {allMessages.Count()} messages in folder: {folderId}");
             Console.WriteLine($"Found {toDelete.Count()} messages that do not have List-Unsubscribe header... deleting");
 
-            var groupedByHeader = toUnsubscribe.GroupBy(msg =>
-                msg.Item2.FirstOrDefault(header => header.Name.Equals("List-Unsubscribe", StringComparison.OrdinalIgnoreCase))?.Value
+            var groupedByHeader = toUnsubscribe.GroupBy(msg =>{
+               var fromHeader = msg.Payload.Headers.FirstOrDefault(header => header.Name.Equals("From", StringComparison.OrdinalIgnoreCase));
+		var replyHeader = msg.Payload.Headers.FirstOrDefault(header => header.Name.Equals("Reply-To", StringComparison.OrdinalIgnoreCase));
+		
+		if (fromHeader != null) {
+		return fromHeader.Value;}
+		else {return replyHeader.Value;}
+}
             );
 
             foreach (var group in groupedByHeader)
             {
-                var values = group.Key.Split(",").Select(x => ExtractUnsubscribeUrl(x));
+		var firstMessage = group.FirstOrDefault();
+		var unsubscribeHeader = firstMessage.Payload.Headers.FirstOrDefault(header => header.Name.Equals("List-Unsubscribe", StringComparison.OrdinalIgnoreCase));
+                var values = unsubscribeHeader.Value.Split(",").Select(x => ExtractUnsubscribeUrl(x));
                 foreach (var unsubscribeUrl in values)
                 {
                     if (unsubscribeUrl.StartsWith("mailto"))
@@ -224,7 +293,7 @@ namespace GmailAPIExample
 
                 var deleteRequest = new BatchDeleteMessagesRequest
                 {
-                    Ids = group.Select(m => m.Item1).ToList()
+                    Ids = group.Select(m => m.Id).ToList()
                 };
                 service.Users.Messages.BatchDelete(batchDeleteRequest, "me");
             }
