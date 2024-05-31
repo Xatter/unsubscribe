@@ -257,11 +257,15 @@ namespace GmailAPIExample
         }
 
         static void BatchDelete(GmailService service, IList<string> ids) {
-            var deleteRequest = new BatchDeleteMessagesRequest
+            var batches = ids.Chunk(1000);
+            foreach (var batch in batches)
             {
-                Ids = ids
-            };
-            service.Users.Messages.BatchDelete(deleteRequest, "me");
+		    var deleteRequest = new BatchDeleteMessagesRequest
+		    {
+			Ids = batch
+		    };
+		    service.Users.Messages.BatchDelete(deleteRequest, "me").Execute();
+            }
         }
 
         static string GetFolderId(GmailService service, string folderName)
