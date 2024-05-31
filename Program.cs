@@ -190,21 +190,9 @@ namespace GmailAPIExample
             var toUnsubscribe = allMessages.Where(msg => msg.Payload.Headers.FirstOrDefault(header => header.Name.Equals("List-Unsubscribe", StringComparison.OrdinalIgnoreCase)) != null);
             var toDelete = allMessages.Where(msg => msg.Payload.Headers.FirstOrDefault(header => header.Name.Equals("List-Unsubscribe", StringComparison.OrdinalIgnoreCase)) == null);
 
-            var batchDeleteRequest = new BatchDeleteMessagesRequest
-            {
-                Ids = toDelete.Select(m => m.Id).ToList()
-            };
-            service.Users.Messages.BatchDelete(batchDeleteRequest, "me");
-
             Console.WriteLine($"Found {allMessages.Count()} messages in folder: {folderId}");
-            {
-                Console.WriteLine($"Found {toDelete.Count()} messages that do not have List-Unsubscribe header... deleting");
-                var deleteRequest = new BatchDeleteMessagesRequest
-                {
-                    Ids = toDelete.Select(m => m.Id).ToList()
-                };
-                service.Users.Messages.BatchDelete(deleteRequest, "me");
-            }
+            Console.WriteLine($"Found {toDelete.Count()} messages that do not have List-Unsubscribe header... deleting");
+            BatchDelete(service, toDelete.Select(m => m.Id).ToList());
 
             var groupedByHeader = toUnsubscribe.GroupBy(msg =>
             {
