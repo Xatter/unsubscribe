@@ -2,3 +2,5 @@ obj/
 bin/
 credentials.json
 token.json/
+allMessages.json
+seen.json
