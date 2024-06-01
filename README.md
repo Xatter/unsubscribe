@@ -15,3 +15,6 @@ Gmail's API REQUIRES OAUTH, which means you need to run this from your laptop so
 
     dotnet run
 
+If this code looks like "That's a pretty strange way to do this" I agree! This code is optimized around Gmail API call limits and not necessarily the best possible parallel execution.
+
+Therefore, we group based on the sender of an email and only send 1 unsubscribe per sender, not per-email.
