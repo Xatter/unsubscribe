@@ -19,13 +19,9 @@ using System.Text.Json;
 
 namespace GmailAPIExample
 {
-    class Program
+    public static class HigherOrder
     {
-        const string EMAIL_ADDRESS = "jfwallac@gmail.com";
-        static readonly string[] Scopes = { GmailService.Scope.MailGoogleCom };
-        const string ApplicationName = "UnsubscribeMe";
-
-        static T Safe<T>(Func<T> func)
+        public static T Safe<T>(Func<T> func)
         {
             try
             {
@@ -39,7 +35,7 @@ namespace GmailAPIExample
             return default(T);
         }
 
-        static T Retry<T>(Func<T> f)
+        public static T Retry<T>(Func<T> f)
         {
             while (true)
             {
@@ -91,9 +87,33 @@ namespace GmailAPIExample
                 }
             }
         }
+    }
 
+    public static class GmailExtensions
+    {
+        public static void BatchDelete(this GmailService service, IList<string> ids)
+        {
+            var batches = ids.Chunk(1000);
+            foreach (var batch in batches)
+            {
+                var deleteRequest = new BatchDeleteMessagesRequest
+                {
+                    Ids = batch
+                };
+                service.Users.Messages.BatchDelete(deleteRequest, "me").Execute();
+            }
+        }
+        public static string GetFolderId(this GmailService service, string folderName)
+        {
+            // List all labels in the user's mailbox.
+            var labels = HigherOrder.Safe(service.Users.Labels.List("me").Execute)?.Labels;
 
-        static IList<Message> FetchAllMessages(GmailService service, string folderId)
+            // Find the label with the specified folder name.
+            var folder = labels?.FirstOrDefault(label => label.Name.Equals(folderName, StringComparison.OrdinalIgnoreCase));
+
+            return folder?.Id;
+        }
+        public static IList<Message> FetchAllMessages(this GmailService service, string folderId)
         {
             var result = new List<Message>();
             string? nextPageToken = String.Empty;
@@ -106,7 +126,7 @@ namespace GmailAPIExample
                 request.PageToken = nextPageToken;
                 request.MaxResults = 1000;
 
-                var response = Safe(request.Execute);
+                var response = HigherOrder.Safe(request.Execute);
 
                 IList<Message>? messages = response?.Messages;
                 if (messages != null && messages.Count > 0)
@@ -118,7 +138,7 @@ namespace GmailAPIExample
                         var getRequest = service.Users.Messages.Get("me", message.Id);
                         getRequest.Format = UsersResource.MessagesResource.GetRequest.FormatEnum.Metadata;
 
-                        var msg = Retry(getRequest.Execute);
+                        var msg = HigherOrder.Retry(getRequest.Execute);
 
                         if (msg != null)
                         {
@@ -134,6 +154,14 @@ namespace GmailAPIExample
 
             return result;
         }
+    }
+
+    public class Program
+    {
+        const string EMAIL_ADDRESS = "jfwallac@gmail.com";
+        static readonly string[] Scopes = { GmailService.Scope.MailGoogleCom };
+        const string ApplicationName = "UnsubscribeMe";
+
 
         static void Main(string[] args)
         {
@@ -164,7 +192,7 @@ namespace GmailAPIExample
             string folderName = "Crap";
 
             // Get the folder ID based on the folder name.
-            string folderId = GetFolderId(service, folderName);
+            string folderId = service.GetFolderId(folderName);
 
             if (string.IsNullOrEmpty(folderId))
             {
@@ -184,7 +212,7 @@ namespace GmailAPIExample
             }
             else
             {
-                allMessages = FetchAllMessages(service, folderId);
+                allMessages = service.FetchAllMessages(folderId);
             }
 
             var toUnsubscribe = allMessages.Where(msg => msg.Payload.Headers.FirstOrDefault(header => header.Name.Equals("List-Unsubscribe", StringComparison.OrdinalIgnoreCase)) != null);
@@ -192,7 +220,7 @@ namespace GmailAPIExample
 
             Console.WriteLine($"Found {allMessages.Count()} messages in folder: {folderId}");
             Console.WriteLine($"Found {toDelete.Count()} messages that do not have List-Unsubscribe header... deleting");
-            BatchDelete(service, toDelete.Select(m => m.Id).ToList());
+            service.BatchDelete(toDelete.Select(m => m.Id).ToList());
 
             var groupedByHeader = toUnsubscribe.GroupBy(msg =>
             {
@@ -213,7 +241,7 @@ namespace GmailAPIExample
                 if (seen.Contains(group.Key))
                 {
                     Console.WriteLine($"Already processed {group.Key}, skipping ....... ");
-                    BatchDelete(service, group.Select(m => m.Id).ToList());
+                    service.BatchDelete(group.Select(m => m.Id).ToList());
                     continue;
                 }
 
@@ -249,35 +277,15 @@ namespace GmailAPIExample
                     }
                 }
 
-                BatchDelete(service, group.Select(m => m.Id).ToList());
+                service.BatchDelete(group.Select(m => m.Id).ToList());
                 File.AppendAllLines("seen.json", new List<string>() { group.Key });
             }
 
             File.Delete("allMessages.json");
+            File.Delete("seen.json");
         }
 
-        static void BatchDelete(GmailService service, IList<string> ids) {
-            var batches = ids.Chunk(1000);
-            foreach (var batch in batches)
-            {
-		    var deleteRequest = new BatchDeleteMessagesRequest
-		    {
-			Ids = batch
-		    };
-		    service.Users.Messages.BatchDelete(deleteRequest, "me").Execute();
-            }
-        }
 
-        static string GetFolderId(GmailService service, string folderName)
-        {
-            // List all labels in the user's mailbox.
-            var labels = Safe(service.Users.Labels.List("me").Execute)?.Labels;
-
-            // Find the label with the specified folder name.
-            var folder = labels?.FirstOrDefault(label => label.Name.Equals(folderName, StringComparison.OrdinalIgnoreCase));
-
-            return folder?.Id;
-        }
 
         static string ExtractUnsubscribeUrl(string headerValue)
         {
@@ -315,7 +323,7 @@ namespace GmailAPIExample
             };
 
             // Send the unsubscribe email.
-            Retry(service.Users.Messages.Send(message, "me").Execute);
+            HigherOrder.Retry(service.Users.Messages.Send(message, "me").Execute);
         }
 
         static string CreateMessageBody(string from, string to, string subject, string body)
