@@ -113,7 +113,7 @@ namespace GmailAPIExample
 
             return folder?.Id;
         }
-        public static IList<Message> FetchAllMessages(this GmailService service, string folderId)
+        public static IList<Message> FetchAllMessagesInFolder(this GmailService service, string folderId)
         {
             var result = new List<Message>();
             string? nextPageToken = String.Empty;
@@ -212,7 +212,7 @@ namespace GmailAPIExample
             }
             else
             {
-                allMessages = service.FetchAllMessages(folderId);
+                allMessages = service.FetchAllMessagesInFolder(folderId);
             }
 
             var toUnsubscribe = allMessages.Where(msg => msg.Payload.Headers.FirstOrDefault(header => header.Name.Equals("List-Unsubscribe", StringComparison.OrdinalIgnoreCase)) != null);
