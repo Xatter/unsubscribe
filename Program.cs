@@ -1,14 +1,12 @@
 ﻿using Google.Apis.Auth.OAuth2;
 using Google.Apis.Gmail.v1;
 using Google.Apis.Gmail.v1.Data;
-using Google.Apis.Requests;
 using Google.Apis.Services;
 using Google.Apis.Util.Store;
 using Microsoft.VisualBasic;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
-using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Reflection.Metadata;
@@ -19,142 +17,6 @@ using System.Text.Json;
 
 namespace GmailAPIExample
 {
-    public static class HigherOrder
-    {
-        public static T Safe<T>(Func<T> func)
-        {
-            try
-            {
-                return func();
-            }
-            catch (System.Exception e)
-            {
-                System.Console.WriteLine(e);
-            }
-
-            return default(T);
-        }
-
-        public static T Retry<T>(Func<T> f)
-        {
-            while (true)
-            {
-                try
-                {
-                    return f();
-                }
-                catch (Google.GoogleApiException ex)
-                {
-                    if (ex.HttpStatusCode == System.Net.HttpStatusCode.TooManyRequests)
-                    {
-                        // Extract the retry time from the exception message
-                        Console.WriteLine(ex.Message);
-                        string retryAfter = ex.Message.Split('(')[0].Trim().Split(' ').Last();
-                        // Create a CultureInfo object with the "en-US" culture
-                        CultureInfo culture = new CultureInfo("en-US");
-
-                        // Define the custom date and time format
-                        string format = "yyyy-MM-ddTHH:mm:ss.fffZ";
-
-                        DateTime retryTime = DateTime.ParseExact(retryAfter, format, culture);
-
-                        // Calculate the delay until the retry time
-                        TimeSpan delay = retryTime - DateTime.Now;
-
-                        if (delay.TotalSeconds > 0)
-                        {
-                            Console.WriteLine($"User-rate limit exceeded. Retrying after {delay.TotalSeconds} seconds...");
-
-                            // Wait for the specified delay before retrying
-                            System.Threading.Thread.Sleep(delay);
-
-                            // Retry the operation
-                        }
-                        else
-                        {
-                            Console.WriteLine("User-rate limit exceeded, but the retry time has already passed.");
-                        }
-                    }
-                    else
-                    {
-                        // Handle other types of GoogleApiException
-                        Console.WriteLine($"GoogleApiException occurred: {ex.Message}");
-                    }
-                }
-                catch (TaskCanceledException)
-                {
-                    Console.WriteLine($"Got TaskCanceledException: Retrying ...");
-                }
-            }
-        }
-    }
-
-    public static class GmailExtensions
-    {
-        public static void BatchDelete(this GmailService service, IList<string> ids)
-        {
-            var batches = ids.Chunk(1000);
-            foreach (var batch in batches)
-            {
-                var deleteRequest = new BatchDeleteMessagesRequest
-                {
-                    Ids = batch
-                };
-                service.Users.Messages.BatchDelete(deleteRequest, "me").Execute();
-            }
-        }
-        public static string GetFolderId(this GmailService service, string folderName)
-        {
-            // List all labels in the user's mailbox.
-            var labels = HigherOrder.Safe(service.Users.Labels.List("me").Execute)?.Labels;
-
-            // Find the label with the specified folder name.
-            var folder = labels?.FirstOrDefault(label => label.Name.Equals(folderName, StringComparison.OrdinalIgnoreCase));
-
-            return folder?.Id;
-        }
-        public static IList<Message> FetchAllMessagesInFolder(this GmailService service, string folderId)
-        {
-            var result = new List<Message>();
-            string? nextPageToken = String.Empty;
-            BatchRequest batch = new BatchRequest(service);
-
-            do
-            {
-                var request = service.Users.Messages.List("me");
-                request.LabelIds = new List<string>() { folderId };
-                request.PageToken = nextPageToken;
-                request.MaxResults = 1000;
-
-                var response = HigherOrder.Safe(request.Execute);
-
-                IList<Message>? messages = response?.Messages;
-                if (messages != null && messages.Count > 0)
-                {
-                    Console.WriteLine($"Got {messages.Count} messages");
-                    Console.WriteLine($"Total so far: {result.Count}");
-                    foreach (var message in messages)
-                    {
-                        var getRequest = service.Users.Messages.Get("me", message.Id);
-                        getRequest.Format = UsersResource.MessagesResource.GetRequest.FormatEnum.Metadata;
-
-                        var msg = HigherOrder.Retry(getRequest.Execute);
-
-                        if (msg != null)
-                        {
-                            File.AppendAllLines("allMessages.json", new List<string> { JsonSerializer.Serialize(msg) });
-                            result.Add(msg);
-                        }
-                    }
-                }
-
-                nextPageToken = response?.NextPageToken;
-                batch = new BatchRequest(service);
-            } while (!String.IsNullOrEmpty(nextPageToken));
-
-            return result;
-        }
-    }
 
     public class Program
     {
@@ -216,11 +78,7 @@ namespace GmailAPIExample
             }
 
             var toUnsubscribe = allMessages.Where(msg => msg.Payload.Headers.FirstOrDefault(header => header.Name.Equals("List-Unsubscribe", StringComparison.OrdinalIgnoreCase)) != null);
-            var toDelete = allMessages.Where(msg => msg.Payload.Headers.FirstOrDefault(header => header.Name.Equals("List-Unsubscribe", StringComparison.OrdinalIgnoreCase)) == null);
-
             Console.WriteLine($"Found {allMessages.Count()} messages in folder: {folderId}");
-            Console.WriteLine($"Found {toDelete.Count()} messages that do not have List-Unsubscribe header... deleting");
-            service.BatchDelete(toDelete.Select(m => m.Id).ToList());
 
             var groupedByHeader = toUnsubscribe.GroupBy(msg =>
             {
@@ -323,7 +181,7 @@ namespace GmailAPIExample
             };
 
             // Send the unsubscribe email.
-            HigherOrder.Retry(service.Users.Messages.Send(message, "me").Execute);
+            Helpers.Retry(service.Users.Messages.Send(message, "me").Execute);
         }
 
         static string CreateMessageBody(string from, string to, string subject, string body)
