@@ -26,3 +26,8 @@ As written, this will find all of the messages that have the `List-Unsubscribe` 
 It will do this only once per-sender, but it will then delete all the messages from that sender.
 
 You can optionally include a folder/label and it will do the above for only that folder.
+
+
+# WHY IS THERE CODE???
+
+Because I'm a smelly nerd
