@@ -4,7 +4,7 @@ namespace GmailAPIExample
 {
     public static class Helpers
     {
-        public static T Safe<T>(Func<T> func)
+        public static T? Safe<T>(Func<T> func)
         {
             try
             {
@@ -61,7 +61,8 @@ namespace GmailAPIExample
                     else
                     {
                         // Handle other types of GoogleApiException
-                        Console.WriteLine($"GoogleApiException occurred: {ex.Message}");
+                        Console.WriteLine($"GoogleApiException occurred: {ex.Message} {ex}");
+                        throw;
                     }
                 }
                 catch (TaskCanceledException)

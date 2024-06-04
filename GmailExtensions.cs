@@ -9,6 +9,7 @@ namespace GmailAPIExample
     {
         public static void BatchDelete(this GmailService service, IList<string> ids)
         {
+            // Gmail API limitation, can only delete 1000 messages at a time
             var batches = ids.Chunk(1000);
             foreach (var batch in batches)
             {
@@ -16,10 +17,12 @@ namespace GmailAPIExample
                 {
                     Ids = batch
                 };
+
+                // Maybe this needs to be retried?
                 service.Users.Messages.BatchDelete(deleteRequest, "me").Execute();
             }
         }
-        public static string GetFolderId(this GmailService service, string folderName)
+        public static string? GetFolderId(this GmailService service, string folderName)
         {
             // List all labels in the user's mailbox.
             var labels = Helpers.Safe(service.Users.Labels.List("me").Execute)?.Labels;
@@ -29,7 +32,7 @@ namespace GmailAPIExample
 
             return folder?.Id;
         }
-        public static IList<Message> FetchAllMessagesInFolder(this GmailService service, string folderId)
+        public static IList<Message> FetchAllMessagesInFolder(this GmailService service, string? folderId = null)
         {
             var result = new List<Message>();
             string? nextPageToken = String.Empty;
@@ -38,7 +41,10 @@ namespace GmailAPIExample
             do
             {
                 var request = service.Users.Messages.List("me");
-                request.LabelIds = new List<string>() { folderId };
+                if (folderId != null)
+                {
+                    request.LabelIds = new List<string>() { folderId };
+                }
                 request.PageToken = nextPageToken;
                 request.MaxResults = 1000;
 
@@ -69,6 +75,43 @@ namespace GmailAPIExample
             } while (!String.IsNullOrEmpty(nextPageToken));
 
             return result;
+        }
+
+        public static void SendUnsubscribeEmail(this GmailService service, string email, string unsubscribeUrl)
+        {
+            var withoutMailto = unsubscribeUrl.Substring(unsubscribeUrl.IndexOf(":") + 1);
+            var toAddress = withoutMailto;
+            var subject = String.Empty;
+
+            if (withoutMailto.Contains('?'))
+            {
+                toAddress = withoutMailto.Split("?")[0];
+                var query = withoutMailto.Split("?")[1];
+                subject = query.Substring(query.IndexOf("subject=") + ("subject=".Count()));
+            }
+
+            // Create the unsubscribe email message.
+            var message = new Message
+            {
+                Raw = CreateMessageBody(email, toAddress, subject, "")
+            };
+
+            // Send the unsubscribe email.
+            try
+            {
+                Helpers.Retry(service.Users.Messages.Send(message, "me").Execute);
+            }
+            catch
+            {
+                Console.WriteLine(message.Raw);
+            }
+        }
+
+        static string CreateMessageBody(string from, string to, string subject, string body)
+        {
+            var msgBody = $"From: {from}\r\nTo: {to}\r\nSubject: {subject}\r\n\r\n{body}";
+            Console.WriteLine(msgBody);
+            return Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(msgBody));
         }
     }
 }

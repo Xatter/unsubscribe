@@ -25,7 +25,7 @@ namespace GmailAPIExample
         const string ApplicationName = "UnsubscribeMe";
 
 
-        static void Main(string[] args)
+        static async Task Main(string[] args)
         {
             UserCredential credential;
 
@@ -54,7 +54,7 @@ namespace GmailAPIExample
             string folderName = "Crap";
 
             // Get the folder ID based on the folder name.
-            string folderId = service.GetFolderId(folderName);
+            string? folderId = service.GetFolderId(folderName);
 
             if (string.IsNullOrEmpty(folderId))
             {
@@ -69,12 +69,16 @@ namespace GmailAPIExample
                 foreach (var line in File.ReadAllLines("allMessages.json"))
                 {
                     var record = JsonSerializer.Deserialize<Message>(line);
-                    allMessages.Add(record);
+                    if (record != null)
+                    {
+                        allMessages.Add(record);
+                    }
                 }
             }
             else
             {
-                allMessages = service.FetchAllMessagesInFolder(folderId);
+                allMessages = service.FetchAllMessagesInFolder();
+                // allMessages = service.FetchAllMessagesInFolder(folderId);
             }
 
             var toUnsubscribe = allMessages.Where(msg => msg.Payload.Headers.FirstOrDefault(header => header.Name.Equals("List-Unsubscribe", StringComparison.OrdinalIgnoreCase)) != null);
@@ -112,10 +116,9 @@ namespace GmailAPIExample
                     {
                         if (!string.IsNullOrEmpty(unsubscribeUrl))
                         {
-
                             if (unsubscribeUrl.StartsWith("mailto"))
                             {
-                                SendUnsubscribeEmail(service, unsubscribeUrl);
+                                service.SendUnsubscribeEmail(EMAIL_ADDRESS, unsubscribeUrl);
                                 Console.WriteLine($"Unsubscribe email sent for message with List-Unsubscribe: {group.Key}");
                             }
                             else
@@ -123,12 +126,12 @@ namespace GmailAPIExample
                                 try
                                 {
                                     HttpClient client = new HttpClient();
-                                    client.GetAsync(unsubscribeUrl).Wait();
+                                    await client.GetAsync(unsubscribeUrl);
                                     Console.WriteLine($"Unsubscribe URL visited {unsubscribeUrl}");
                                 }
                                 catch (Exception e)
                                 {
-                                    Console.WriteLine($"Error while visiting URL: {unsubscribeUrl}: {e}");
+                                    Console.WriteLine($"Error while visiting unsubscribe URL: {unsubscribeUrl}: {e}");
                                 }
                             }
                         }
@@ -143,9 +146,7 @@ namespace GmailAPIExample
             File.Delete("seen.json");
         }
 
-
-
-        static string ExtractUnsubscribeUrl(string headerValue)
+        static string? ExtractUnsubscribeUrl(string headerValue)
         {
             // Extract the unsubscribe URL from the header value.
             // The header value format is typically: <mailto:unsubscribe@example.com> or <https://example.com/unsubscribe>
@@ -159,36 +160,6 @@ namespace GmailAPIExample
             }
 
             return null;
-        }
-
-        static void SendUnsubscribeEmail(GmailService service, string unsubscribeUrl)
-        {
-            var withoutMailto = unsubscribeUrl.Substring(unsubscribeUrl.IndexOf(":") + 1);
-            var toAddress = withoutMailto;
-            var subject = String.Empty;
-
-            if (withoutMailto.Contains('?'))
-            {
-                toAddress = withoutMailto.Split("?")[0];
-                var query = withoutMailto.Split("?")[1];
-                subject = query.Substring(query.IndexOf("subject=") + ("subject=".Count()));
-            }
-
-            // Create the unsubscribe email message.
-            var message = new Message
-            {
-                Raw = CreateMessageBody(EMAIL_ADDRESS, toAddress, subject, "")
-            };
-
-            // Send the unsubscribe email.
-            Helpers.Retry(service.Users.Messages.Send(message, "me").Execute);
-        }
-
-        static string CreateMessageBody(string from, string to, string subject, string body)
-        {
-            var msgBody = $"From: {from}\r\nTo: {to}\r\nSubject: {subject}\r\n\r\n{body}";
-            Console.WriteLine(msgBody);
-            return Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(msgBody));
         }
     }
 }
