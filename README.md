@@ -18,3 +18,11 @@ Gmail's API REQUIRES OAUTH, which means you need to run this from your laptop so
 If this code looks like "That's a pretty strange way to do this" I agree! This code is optimized around Gmail API call limits and not necessarily the best possible parallel execution.
 
 Therefore, we group based on the sender of an email and only send 1 unsubscribe per sender, not per-email.
+
+# What does it do?
+
+As written, this will find all of the messages that have the `List-Unsubscribe` header and then it will parse that header, following any links or sending unsubscribe emails to that sender.
+
+It will do this only once per-sender, but it will then delete all the messages from that sender.
+
+You can optionally include a folder/label and it will do the above for only that folder.
